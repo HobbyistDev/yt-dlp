@@ -1,15 +1,22 @@
+import re
+import json
+import urllib.parse
+import base64
+
 from .common import InfoExtractor
 from ..utils import (
+    ExtractorError,
     determine_ext,
     float_or_none,
+    get_element_text_and_html_by_tag,
     join_nonempty,
     traverse_obj,
     url_or_none,
 )
-import json
 
 
 class DailyWireBaseIE(InfoExtractor):
+    _NETRC_MACHINE = 'dailywire'
     _JSON_PATH = {
         'episode': ('props', 'pageProps', 'episodeData', 'episode'),
         'videos': ('props', 'pageProps', 'videoData', 'video'),
@@ -19,7 +26,73 @@ class DailyWireBaseIE(InfoExtractor):
         'content-type': 'application/json',
     }
     _QUERY = {}
-
+    
+    def _perform_login(self, username, password):
+        self.write_debug('Trying to login')
+        '''
+        The url requests to https://authorize.dailywire.com/authorize 
+        and require 'response_type(=code)' and 'client_id'. This url should
+        redirect and the give us _csrf cookie
+        '''
+        webpage_instance = self._request_webpage(
+            'https://authorize.dailywire.com/authorize', 'authorize webpage',
+            query={'response_type': 'code', 'client_id': 'hDgwLR0K67GTe9IuVKATlbohhsAbD37H'})
+        
+        next_url = webpage_instance.geturl()
+        print(next_url)
+        #TODO : get query from next_url
+        required_query = urllib.parse.parse_qs(next_url)
+        print(required_query)
+        
+        # should return the _csrf cookie
+        print(self._get_cookies(next_url).get('_csrf'))
+        
+        authorize_webpage = self._download_webpage(
+            next_url, 'auth_webpage')
+        #print(get_element_text_and_html_by_tag('script', authorize_webpage))
+        # extra parameter can be found in <script> var config = JSON.parse(<config>),
+        # the <config> is base64 decoded
+        
+        config_json = re.search(
+            r'\bwindow\.atob\("(?P<data>[\w=]+)"[\)]+', authorize_webpage).group('data')
+        config_json = self._parse_json(
+            base64.b64decode(config_json), 'config')
+          
+        print(config_json.get('extraParams'))
+        
+        # this request return http 400
+        try :
+            real_login_webpage = self._download_webpage(
+            'https://authorize.dailywire.com/usernamepassword/login',
+                'login url',data=json.dumps({
+                    'connection': 'Username-Password-Authentication',
+                    'client_id': config_json.get('clientID'),
+                    'tenant': 'dailywire',
+                    'sso': True,
+                    'popup_option': [],
+                    'audience': 'https://api.dailywire.com/',
+                    'redirect_uri': config_json.get('callbackURL'),
+                    "nonce": "VldnLkJNZ25rVXlvN3pES3ljel9PNXJvVFdzTFQxbUo4LTJHWGN2eHlmZg==",
+                    'username': username, 
+                    'password': password,
+                    **config_json.get('extraParams')}).encode())
+        except ExtractorError as e:
+            if not isinstance(e.cause, urllib.error.HTTPError):
+                raise
+            error = self._parse_json(e.cause.read(), 'error')
+            print(error)
+            
+        '''
+         The url get token from 'https://authorize.dailywire.com/oauth/token' (POST), with request body contain
+         {
+            'client_id': <client_id>,
+            'code': <code>,
+            'code_verifier': <code_verifier>,
+            'grant_type': 'authorization_code',
+            'redirect_url': https://www.dailywire.com/callback
+         }
+         From this url, we can get the token in json['access_token']
+        '''
     def _get_json(self, url):
         sites_type, slug = self._match_valid_url(url).group('sites_type', 'id')
         # another api call, can be used to get access_token and fallback json
