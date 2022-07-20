@@ -81,7 +81,7 @@ class DailyWireBaseIE(InfoExtractor):
                 raise
             error = self._parse_json(e.cause.read(), 'error')
             print(error)
-            
+        
         '''
          The url get token from 'https://authorize.dailywire.com/oauth/token' (POST), with request body contain
          {
