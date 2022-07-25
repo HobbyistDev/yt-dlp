@@ -60,11 +60,10 @@ class DailyWireBaseIE(InfoExtractor):
           
         print(config_json.get('extraParams'))
         
-        # this request return http 400
         try :
             real_login_webpage = self._download_webpage(
-            'https://authorize.dailywire.com/usernamepassword/login',
-                'login url',data=json.dumps({
+                'https://authorize.dailywire.com/usernamepassword/login', 'login url',
+                data=json.dumps({
                     'connection': 'Username-Password-Authentication',
                     'client_id': config_json.get('clientID'),
                     'tenant': 'dailywire',
@@ -73,15 +72,17 @@ class DailyWireBaseIE(InfoExtractor):
                     'audience': 'https://api.dailywire.com/',
                     'redirect_uri': config_json.get('callbackURL'),
                     "nonce": "VldnLkJNZ25rVXlvN3pES3ljel9PNXJvVFdzTFQxbUo4LTJHWGN2eHlmZg==",
-                    'username': username, 
-                    'password': password,
-                    **config_json.get('extraParams')}).encode())
+                    'username': f'{username}', 
+                    'password': f'{password}',
+                    **config_json.get('extraParams')}).encode(),
+                headers={'Content-Type': 'application/json'})
+            
         except ExtractorError as e:
             if not isinstance(e.cause, urllib.error.HTTPError):
                 raise
             error = self._parse_json(e.cause.read(), 'error')
-            print(error)
-        
+            raise ExtractorError(traverse_obj(error, ('description')))
+            
         '''
          The url get token from 'https://authorize.dailywire.com/oauth/token' (POST), with request body contain
          {
@@ -105,7 +106,7 @@ class DailyWireBaseIE(InfoExtractor):
         # this is not a proper solution to get cookie though,
         # actually we can the access_token from https://authorize.dailywire.com/oauth/token,
         # but this requires full login support (-u, -p, --netrc)
-        access_token = self._get_cookies(f'https://www.dailywire.com/_next/data/ACNDc_38LPvayJQs8psfX/episode/{slug}.json').get('access_token')
+        access_token = self._get_cookies(f'https://www.dailywire.com/_next/data/{json_data.get("buildId")}/episode/{slug}.json').get('access_token')
         # set access_token from cookie to headers
         # assuming the access_token token is always Bearer
         self._HEADER['Authorization'] = f'Bearer {access_token}'
@@ -202,6 +203,12 @@ query getEpisodeBySlug($slug: String!) {
     }, {
         'url': 'https://www.dailywire.com/videos/the-hyperions',
         'only_matching': True,
+    }, {
+        'url': 'https://www.dailywire.com/episode/ep-1520-the-return-of-religious-freedom-bonus-hour-2',
+        'info_dict': {
+            'id': 'fixme',
+            'ext': 'mp4',
+        }
     }]
 
     def _real_extract(self, url):
