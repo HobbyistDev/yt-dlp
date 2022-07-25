@@ -28,6 +28,7 @@ class DailyWireBaseIE(InfoExtractor):
     _QUERY = {}
     
     def _perform_login(self, username, password):
+        # The login function still in work
         self.write_debug('Trying to login')
         '''
         The url requests to https://authorize.dailywire.com/authorize 
@@ -39,26 +40,21 @@ class DailyWireBaseIE(InfoExtractor):
             query={'response_type': 'code', 'client_id': 'hDgwLR0K67GTe9IuVKATlbohhsAbD37H'})
         
         next_url = webpage_instance.geturl()
-        print(next_url)
-        #TODO : get query from next_url
-        required_query = urllib.parse.parse_qs(next_url)
-        print(required_query)
         
-        # should return the _csrf cookie
-        print(self._get_cookies(next_url).get('_csrf'))
+        required_query = urllib.parse.parse_qs(next_url)
+        
         
         authorize_webpage = self._download_webpage(
             next_url, 'auth_webpage')
         #print(get_element_text_and_html_by_tag('script', authorize_webpage))
         # extra parameter can be found in <script> var config = JSON.parse(<config>),
         # the <config> is base64 decoded
-        
         config_json = re.search(
             r'\bwindow\.atob\("(?P<data>[\w=]+)"[\)]+', authorize_webpage).group('data')
         config_json = self._parse_json(
             base64.b64decode(config_json), 'config')
-          
-        print(config_json.get('extraParams'))
+        
+        print(config_json)
         
         try :
             real_login_webpage = self._download_webpage(
@@ -71,18 +67,29 @@ class DailyWireBaseIE(InfoExtractor):
                     'popup_option': [],
                     'audience': 'https://api.dailywire.com/',
                     'redirect_uri': config_json.get('callbackURL'),
-                    "nonce": "VldnLkJNZ25rVXlvN3pES3ljel9PNXJvVFdzTFQxbUo4LTJHWGN2eHlmZg==",
                     'username': f'{username}', 
                     'password': f'{password}',
                     **config_json.get('extraParams')}).encode(),
-                headers={'Content-Type': 'application/json'})
+                headers={
+                    'Content-Type': 'application/json',
+                    'Auth0-Client': 'eyJuYW1lIjoiYXV0aDAtc3BhLWpzIiwidmVyc2lvbiI6IjEuMTkuMyIsImVudiI6eyJsb2NrLmpzLXVscCI6IjExLjE1LjAiLCJhdXRoMC1qcy11bHAiOiI5LjEwLjIifX0=',
+                    })
             
         except ExtractorError as e:
             if not isinstance(e.cause, urllib.error.HTTPError):
                 raise
             error = self._parse_json(e.cause.read(), 'error')
             raise ExtractorError(traverse_obj(error, ('description')))
-            
+        
+        callback_request_data = self._hidden_inputs(real_login_webpage)
+        print(callback_request_data)
+        
+        # code below return error 404 at final redirect
+        callback_request = self._request_webpage(
+            'https://authorize.dailywire.com/login/callback', 'callback_url',
+            data=f'wa={callback_request_data.get("wa")}&wresult={callback_request_data.get("wresult")}&wctx={callback_request_data.get("wctx")}&rememberMe=true'.encode(),
+            fatal=False)
+        print(callback_request.geturl)
         '''
          The url get token from 'https://authorize.dailywire.com/oauth/token' (POST), with request body contain
          {
@@ -94,6 +101,7 @@ class DailyWireBaseIE(InfoExtractor):
          }
          From this url, we can get the token in json['access_token']
         '''
+        raise ExtractorError
     def _get_json(self, url):
         sites_type, slug = self._match_valid_url(url).group('sites_type', 'id')
         json_data = self._search_nextjs_data(self._download_webpage(url, slug), slug)
@@ -106,10 +114,13 @@ class DailyWireBaseIE(InfoExtractor):
         # this is not a proper solution to get cookie though,
         # actually we can the access_token from https://authorize.dailywire.com/oauth/token,
         # but this requires full login support (-u, -p, --netrc)
-        access_token = self._get_cookies(f'https://www.dailywire.com/_next/data/{json_data.get("buildId")}/episode/{slug}.json').get('access_token')
+        
+        # access_token = self._get_cookies(f'https://www.dailywire.com/_next/data/{json_data.get("buildId")}/episode/{slug}.json').get('access_token')
+        
         # set access_token from cookie to headers
         # assuming the access_token token is always Bearer
-        self._HEADER['Authorization'] = f'Bearer {access_token}'
+        
+        # self._HEADER['Authorization'] = f'Bearer {access_token}'
 
         # using graphql api
         query = {
@@ -215,6 +226,7 @@ query getEpisodeBySlug($slug: String!) {
         slug, episode_info = self._get_json(url)
         urls = traverse_obj(episode_info, (('segments', 'videoUrl'), ..., ('video', 'audio')), expected_type=url_or_none)
         formats, subtitles = [], {}
+        
         # 'or []' intended to give better error message at the end of processing not as fallback
         for url in urls or []:
             if determine_ext(url) != 'm3u8':
