@@ -1,6 +1,6 @@
 from .common import InfoExtractor
 from .turner import TurnerBaseIE
-from ..utils import url_basename
+from ..utils import parse_qs, traverse_obj, url_basename
 
 
 class CNNIE(TurnerBaseIE):
@@ -123,7 +123,8 @@ class CNNBlogsIE(InfoExtractor):
 
 class CNNArticleIE(InfoExtractor):
     _VALID_URL = r'https?://(?:(?:edition|www)\.)?cnn\.com/(?!videos?/)'
-    _TEST = {
+    _TESTS = [{
+        # videoId in json+ld embedUrl or ContentUrl or in data-video-id
         'url': 'http://www.cnn.com/2014/12/21/politics/obama-north-koreas-hack-not-war-but-cyber-vandalism/',
         'md5': '689034c2a3d9c6dc4aa72d65a81efd01',
         'info_dict': {
@@ -135,9 +136,56 @@ class CNNArticleIE(InfoExtractor):
         },
         'expected_warnings': ['Failed to download m3u8 information'],
         'add_ie': ['CNN'],
-    }
+    }, {
+        # url in window.__INITIAL_STATE__
+        'url': 'https://www.cnn.com/travel/article/parrot-steals-gopro-scli-intl',
+        'info_dict': {
+            'id': 'world/2022/02/04/parrot-steals-gopro-new-zealand-lon-orig-na.cnn',
+            'ext': 'mp4',
+            'title': 'Watch parrot steal family\'s GoPro and film flight',
+            'upload_date': '20220204',
+            'duration': 48.0,
+            'thumbnail': 'https://cdn.cnn.com/cnnnext/dam/assets/220204170742-parrot-gopro-lon-orig-na-full-169.jpg',
+            'description': 'md5:5540608be9d61b46019bea7acdcc7a8f',
+        }
+    }]
+
+    def _call_api(self, video_id, display_id, edition='domestic', **custom_query):
+        json_api_data = self._download_json(
+            'https://fave.api.cnn.io/v1/video', display_id,
+            query={'id': video_id, 'customer': 'cnn', 'edition': edition, 'env': 'prod', **custom_query})
+        return json_api_data
 
     def _real_extract(self, url):
-        webpage = self._download_webpage(url, url_basename(url))
-        cnn_url = self._html_search_regex(r"video:\s*'([^']+)'", webpage, 'cnn url')
-        return self.url_result('http://cnn.com/video/?/video/' + cnn_url, CNNIE.ie_key())
+        display_id = url_basename(url)
+        webpage = self._download_webpage(url, display_id)
+
+        initial_state_json = self._search_json(
+            r'window\.__INITIAL_STATE__\s*=\s*', webpage, 'window.__INITIAL_STATE__', display_id, fatal=False)
+
+        if initial_state_json:
+            # root query
+            root_query_json = initial_state_json.get('ROOT_QUERY')
+            root_query_key = [key for key in root_query_json if key.startswith('PAL')][0]
+            root_query_id = root_query_json[root_query_key]['id']
+
+            main_data = initial_state_json.get(root_query_id)
+            regions_id = traverse_obj(main_data, ('regions', 'id'))
+
+            # region json
+            region_data_json = [initial_state_json.get(key) for key in initial_state_json if key.startswith(regions_id)]
+            element_data_json = [
+                traverse_obj(region_data, ('elementContents', 'json', 'videoElement', 'elementContents'), get_all=False)
+                for region_data in region_data_json if region_data.get('type') == 'element'][0]
+
+            return self.url_result(f'https://edition.cnn.com{element_data_json.get("videoUrl")}', CNNIE.ie_key())
+        else:
+            json_ld_data = self._yield_json_ld(webpage, display_id)
+            json_ld_video_data = [json_ld.get('embedUrl') for json_ld in json_ld_data if json_ld.get('@type') == 'VideoObject'][0]
+            api_query = parse_qs(json_ld_video_data)
+            video_id = api_query.get('video')
+            api_query.pop('video')
+            json_data = self._call_api(video_id, display_id, **api_query)
+            print(json_data)
+        # cnn_url = self._html_search_regex(r"video:\s*'([^']+)'", webpage, 'cnn url')
+        # return self.url_result('http://cnn.com/video/?/video/' + cnn_url, CNNIE.ie_key())
