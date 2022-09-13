@@ -218,6 +218,9 @@ class BiliBiliIE(InfoExtractor):
 
         durl = traverse_obj(video_info, ('dash', 'video'))
         audios = traverse_obj(video_info, ('dash', 'audio')) or []
+        flac_audio = traverse_obj(video_info, ('dash', 'flac', 'audio'))
+        if flac_audio:
+            audios.append(flac_audio)
         entries = []
 
         RENDITIONS = ('qn=80&quality=80&type=', 'quality=2&type=mp4')
@@ -620,14 +623,15 @@ class BiliBiliSearchIE(SearchInfoExtractor):
                     'keyword': query,
                     'page': page_num,
                     'context': '',
-                    'order': 'pubdate',
                     'duration': 0,
                     'tids_2': '',
                     '__refresh__': 'true',
                     'search_type': 'video',
                     'tids': 0,
                     'highlight': 1,
-                })['data'].get('result') or []
+                })['data'].get('result')
+            if not videos:
+                break
             for video in videos:
                 yield self.url_result(video['arcurl'], 'BiliBili', str(video['aid']))
 
@@ -795,12 +799,14 @@ class BiliIntlBaseIE(InfoExtractor):
 
     def _get_subtitles(self, *, ep_id=None, aid=None):
         sub_json = self._call_api(
-            '/web/v2/subtitle', ep_id or aid, note='Downloading subtitles list',
-            errnote='Unable to download subtitles list', query=filter_dict({
+            '/web/v2/subtitle', ep_id or aid, fatal=False,
+            note='Downloading subtitles list', errnote='Unable to download subtitles list',
+            query=filter_dict({
                 'platform': 'web',
+                's_locale': 'en_US',
                 'episode_id': ep_id,
                 'aid': aid,
-            }))
+            })) or {}
         subtitles = {}
         for sub in sub_json.get('subtitles') or []:
             sub_url = sub.get('url')
@@ -903,7 +909,7 @@ class BiliIntlBaseIE(InfoExtractor):
 
 
 class BiliIntlIE(BiliIntlBaseIE):
-    _VALID_URL = r'https?://(?:www\.)?bili(?:bili\.tv|intl\.com)/(?:[a-z]{2}/)?(play/(?P<season_id>\d+)/(?P<ep_id>\d+)|video/(?P<aid>\d+))'
+    _VALID_URL = r'https?://(?:www\.)?bili(?:bili\.tv|intl\.com)/(?:[a-zA-Z]{2}/)?(play/(?P<season_id>\d+)/(?P<ep_id>\d+)|video/(?P<aid>\d+))'
     _TESTS = [{
         # Bstation page
         'url': 'https://www.bilibili.tv/en/play/34613/341736',
@@ -946,6 +952,10 @@ class BiliIntlIE(BiliIntlBaseIE):
         # No language in URL
         'url': 'https://www.bilibili.tv/video/2019955076',
         'only_matching': True,
+    }, {
+        # Uppercase language in URL
+        'url': 'https://www.bilibili.tv/EN/video/2019955076',
+        'only_matching': True,
     }]
 
     def _real_extract(self, url):
@@ -969,7 +979,7 @@ class BiliIntlIE(BiliIntlBaseIE):
 
 
 class BiliIntlSeriesIE(BiliIntlBaseIE):
-    _VALID_URL = r'https?://(?:www\.)?bili(?:bili\.tv|intl\.com)/(?:[a-z]{2}/)?play/(?P<id>\d+)$'
+    _VALID_URL = r'https?://(?:www\.)?bili(?:bili\.tv|intl\.com)/(?:[a-zA-Z]{2}/)?play/(?P<id>\d+)/?(?:[?#]|$)'
     _TESTS = [{
         'url': 'https://www.bilibili.tv/en/play/34613',
         'playlist_mincount': 15,
@@ -986,6 +996,9 @@ class BiliIntlSeriesIE(BiliIntlBaseIE):
         },
     }, {
         'url': 'https://www.biliintl.com/en/play/34613',
+        'only_matching': True,
+    }, {
+        'url': 'https://www.biliintl.com/EN/play/34613',
         'only_matching': True,
     }]
 
