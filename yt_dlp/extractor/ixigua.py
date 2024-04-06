@@ -58,6 +58,9 @@ class IxiguaIE(InfoExtractor):
                     'format_id': str_or_none(media.get('quality_type')),
                     'filesize': int_or_none(media.get('size')),
                     'ext': 'mp4',
+                    'http_headers': {
+                        'referer': 'https://www.ixigua.com/'
+                    },
                     **override,
                 }
 
