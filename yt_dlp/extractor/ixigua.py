@@ -30,6 +30,12 @@ class IxiguaIE(InfoExtractor):
             'timestamp': 1629088414,
             'duration': 1030,
         }
+    }, {
+        'url': 'https://www.ixigua.com/7136520673781875232?logTag=38fe102fafe8e209dffa',
+        'info_dict': {
+            'id': '7136520673781875232',
+            'ext': 'mp4'
+        }
     }]
 
     def _get_json_data(self, webpage, video_id):
